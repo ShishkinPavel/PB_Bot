@@ -5,7 +5,7 @@ import requests
 import re
 
 
-bot = telebot.TeleBot('1657268149:AAFHB-3dhhOH0PANCb8nM0Mvf8RHkFjWOzs')
+bot = telebot.TeleBot('TOKEN')
 
 class User:
     def __init__(self,
