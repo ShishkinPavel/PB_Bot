@@ -1,91 +1,139 @@
-import telebot
-import time
 from typing import List, Dict
 import requests
 import re
+import asyncio
+from aiogram import Bot, Dispatcher, executor, types
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
+from aiogram.dispatcher import FSMContext
+from aiogram.dispatcher.filters import Command
+from aiogram.dispatcher.filters.state import State, StatesGroup
+from aiogram.contrib.fsm_storage.memory import MemoryStorage
+
+class Test(StatesGroup):
+    S1 = State()
+    S2 = State()
+    S3 = State()
 
 
-bot = telebot.TeleBot('TOKEN')
+userlist = {}
+
+loop = asyncio.get_event_loop()
+
+bot = Bot(token='TOKEN') #change token
+dp = Dispatcher(bot, storage=MemoryStorage())
+
+button_en = KeyboardButton('English 🇬🇧')
+button_cz = KeyboardButton('Czech 🇨🇿')
+button_ru = KeyboardButton('Русский 🇷🇺')
+greet_kb = ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+greet_kb.add(button_en, button_ru, button_cz)
+
+start = 'Choose a language!' + '\n' + 'Vyberte si jazyk!' + '\n' + 'Выбери язык!'
+ru_commands = {'hi':'Привет, я буду присылать тебе обновления с poznámkových bloků',
+               'uco':'Для начала введи свой učo', 'password':'Теперь введи свой пароль. '
+                'Да, я понимаю, что вводить пароль '
+                'в телеграм-боте не хочется, но иначе пока никак, правда😔',
+                'information':'Информация на данный момент:',
+               'next':'В дальнейшем я буду автоматически '
+                                               'присылать тебе обновления, не благодари😉'}
+
+cz_commands = {'hi':'Ahoj, budu posílat vám aktualizace z poznávacích bloků',
+               'uco':'Nejprve zadejte své učo', 'password':'Nyní zadejte své heslo. '
+                'Ano, chápu, že nechcete zadat heslo do telegramového robota, '
+                'ale neexistuje žádný jiný způsob, omlouvám se😔',
+                'information':'Informace v tuto chvíli',
+               'next':'V budoucnu vám automaticky pošlu aktualizace, neděkujte mi😉'}
+
+en_commands = {'hi':'Hi, I will send you Information from notebooks',
+               'uco':'First of all, enter your učo', 'password':'Now enter your password. '
+                'Yes, I understand that you do not want to enter a password in a telegram bot, '
+                'but there is no other way, sorry😔',
+                'information':'The information on this moment:',
+               'next':'In the future, I will automatically '
+                                               "send you updates, don't thank me😉"}
+
+
 
 class User:
     def __init__(self,
                  login: str,
                  password: str,
-                 update: str) -> None:
+                 update: str,
+                 language: dict) -> None:
         self.login = login
         self.password = password
         self.update = update
+        self.language = language
 
 
-userlist = {}
 
 
-@bot.message_handler(content_types=['text'])
-def checker(message):
-    user_id = message.from_user.id
-    if user_id in userlist.keys():
-        actual_user = userlist[user_id]
-        x = open_web(actual_user.login, actual_user.password, actual_user.update)
-        if x:
-            bot.send_message(user_id, 'Новая информация:')
-            bot.send_message(user_id, x[1])
-            update_info(user_id, x[0])
-        else:
-            pass
-        time.sleep(100)
-        message.text = '/start'
-        checker(message)
+@dp.message_handler(commands='start')
+async def process_start_command(message: types.Message):
+    await message.answer(start, reply_markup=greet_kb)
+    await Test.S1.set()
+
+
+@dp.message_handler(state=Test.S1)
+async def lang(message: types.Message, state: FSMContext):
+    global language
+    language = ""
+    if message.text == button_ru.text:
+        language = ru_commands
+    if message.text == button_en.text:
+        language = en_commands
+    if message.text == button_cz.text:
+        language = cz_commands
+    if language:
+        await message.answer(language['hi'])
+        await message.answer(language['uco'])
+        await Test.S2.set()
     else:
-        send_text(message)
+        await message.answer('try again')
+        await message.answer('press /start')
+        await state.reset_state()
 
 
-def send_text(message):
-    if message.text == '/start':
-        bot.send_message(message.from_user.id, 'Привет, я буду присылать тебе обновления с poznámkových bloků')
-        time.sleep(1)
-        bot.send_message(message.from_user.id, 'Для начала введи свой učo')
-        bot.register_next_step_handler(message, get_uco)
-    elif message.text == 'zanogo':
-        bot.send_message(message.from_user.id, 'Введи свой učo')
-        bot.register_next_step_handler(message, get_uco)
+
+@dp.message_handler(state=Test.S2)
+async def lang(message: types.Message, state: FSMContext):
+    if not message.text.isdigit():
+        await message.answer('try again')
+        await message.answer('press /start')
+        await state.reset_state()
     else:
-        bot.send_message(message.from_user.id, 'Я не понимаю:( Попробуй ввести "/start"!')
+        global uco
+        uco = message.text
+        await message.answer(language['password'])
+        await Test.S3.set()
 
 
-def get_uco(message):
-    uco = message.text
-    time.sleep(1)
-    bot.send_message(message.from_user.id, 'Теперь введи свой пароль. Да, я понимаю, что вводить пароль '
-                                           'в телеграм-боте '
-                                           'не хочется, но иначе пока никак, правда:(')
-    bot.register_next_step_handler(message, get_password, uco)
 
 
-def get_password(message, uco):
+@dp.message_handler(state=Test.S3)
+async def lang(message: types.Message, state: FSMContext):
     password = message.text
-    time.sleep(1)
     x = open_web(uco, password, "")
+
     if not x:
-        bot.send_message(message.from_user.id, 'Вы ввели неправильный логин или пароль, попробуйте еще раз!')
-        message.text = 'zanogo'
-        send_text(message)
+        await message.answer('try again')
+        await message.answer('press /start')
+        await state.reset_state()
     else:
-        new_user(message.from_user.id, uco, password, x[0])
-        bot.send_message(message.from_user.id, 'Информация на данный момент:')
-        bot.send_message(message.from_user.id, x[1])
-        bot.send_message(message.from_user.id, 'В дальнейшем я буду автоматически '
-                                               'присылать тебе обновления, не благодари;)')
-        time.sleep(100)
-        message.text = "/start"
-        checker(message)
+        new_user(message.from_user.id, uco, password, x[0], language)
+        await message.answer(language['information'])
+        await message.answer(x[1])
+        await message.answer(language['next'])
+        await state.reset_state()
 
 
-def new_user(id, login, parol, actual_info):
-    userlist[id] = User(login, parol, actual_info)
+def new_user(id, login, parol, actual_info, language):
+    userlist[id] = User(login, parol, actual_info, language)
 
 
 def update_info(id, actual_info):
     userlist[id].update = actual_info
+
 
 
 def creator(li, st):
@@ -104,7 +152,7 @@ def creator(li, st):
 
 
 def open_web(name, parol, actual):
-    if re.search(r'[^a-zA-Z0-9]', parol) or not name.isdigit():
+    if not name.isdigit():
         return None
 
     url = "https://is.muni.cz/auth/student/poznamkove_bloky_nahled?obdobi=8063;studium=992339"
@@ -113,11 +161,13 @@ def open_web(name, parol, actual):
         return None
 
     x = page.text.split("\n")
-
+    is_cz = False
     dl_checker = False
     dl = creator(x, "<dl")
     h3 = creator(x, "<h3")
     actualita = dl[0].split('dd>')[1].split("</")[0]
+    if 'Poslední změna:' in dl[0]:
+        is_cz = True
 
     time = actualita.split(",")[0]
     if time == actual:
@@ -136,10 +186,14 @@ def open_web(name, parol, actual):
                 fixer += 1
         for i in dt:
             if time in i:
+                if is_cz:
+                    x = i.split('změněno')[1].split("</")
+                    changing = "změněno" + x[0] + '\n' + x[1].split('<pre>')[1]
+                else:
+                    x = i.split('last modified')[1].split("</")
+                    changing = "last modified" + x[0] + '\n' + x[1].split('<pre>')[1]
                 course = h3[dl.index(every)+4].split(">")[1].split("</h")[0]
                 exam = i.split('>')[1].split("</dt")[0]
-                x = i.split('změněno')[1].split("</")
-                changing = "změněno" + x[0] + '\n' + x[1].split('<pre>')[1]
                 new_info = course + "\n" + exam + "\n" + changing
                 breaker = True
                 break
@@ -150,5 +204,24 @@ def open_web(name, parol, actual):
 
 
 
+async def sheduled(wait):
+    while True:
+        await asyncio.sleep(wait)
+        if userlist:
+            keys = list(userlist.keys())
+            for every in keys:
+                login = userlist[every].login
+                password = userlist[every].password
+                update = userlist[every].update
+                language = userlist[every].language
+                x = open_web(uco, password, update)
+                if x:
+                    await bot.send_message(language['next'])
+                    await bot.send_message(every, x[1])
+                    update_info(every, x[0])
+
+
+
 if __name__ == '__main__':
-    bot.polling()
+    loop.create_task(sheduled(300))
+    executor.start_polling(dp, skip_updates=True)
